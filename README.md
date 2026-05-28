@@ -4,6 +4,12 @@
 
 This service stores metadata for public GitHub repositories in a local database and exposes a small REST API to create, read, refresh, and delete those records. I chose the GitHub REST API because repository URLs are easy to validate strictly, responses are stable JSON, and unauthenticated access works for local evaluation while an optional token can raise rate limits.
 
+## Demo And Approach
+
+- Demo video: [`demo/rest_api_assessment_demo.mp4`](demo/rest_api_assessment_demo.mp4)
+- Demo narration/script: [`demo/DEMO_SCRIPT.md`](demo/DEMO_SCRIPT.md)
+- Detailed way of approach: [`docs/APPROACH.md`](docs/APPROACH.md)
+
 ## Architecture Summary
 
 The application uses a layered FastAPI architecture:
