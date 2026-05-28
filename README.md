@@ -9,6 +9,7 @@ This service stores metadata for public GitHub repositories in a local database 
 - Demo video: [`demo/rest_api_assessment_demo.mp4`](demo/rest_api_assessment_demo.mp4)
 - Demo narration/script: [`demo/DEMO_SCRIPT.md`](demo/DEMO_SCRIPT.md)
 - Detailed way of approach: [`docs/APPROACH.md`](docs/APPROACH.md)
+- Submission-ready details and copy-paste explanation: [`docs/SUBMISSION_DETAILS.md`](docs/SUBMISSION_DETAILS.md)
 
 ## Architecture Summary
 
