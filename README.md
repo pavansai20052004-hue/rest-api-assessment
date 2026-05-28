@@ -13,8 +13,11 @@ The application uses a layered FastAPI architecture:
 - `app/data`: database access methods for repository records.
 - `app/db`: SQLAlchemy async engine, ORM base, and models.
 - `app/schemas`: request validation, response schemas, and internal DTOs.
+- `alembic`: versioned database migrations for repeatable PostgreSQL setup.
 
 For a `POST /repositories` request, Pydantic first normalizes and validates the supplied GitHub URL or `owner/repo` identifier. The service checks for an existing local record, fetches metadata from GitHub with `httpx.AsyncClient`, maps the upstream JSON into an internal DTO, and asks the data layer to persist it with SQLAlchemy. Duplicate protection is enforced both by service logic and by a database-level unique constraint on `external_id`.
+
+Every request receives an `X-Request-ID` response header and emits a structured JSON access log with method, path, status code, duration, and trace ID. GitHub calls use bounded retry/backoff for transient network failures, rate limits, and temporary upstream outages before returning the assessment-required `502` or `503` response.
 
 ## Prerequisites
 
@@ -69,8 +72,10 @@ For a `POST /repositories` request, Pydantic first normalizes and validates the 
 6. Initialize the schema:
 
    ```bash
-   python scripts/init_db.py
+   alembic upgrade head
    ```
+
+   If you want the simplest non-migration bootstrap for local experimentation, `python scripts/init_db.py` creates the same ORM tables directly.
 
 7. Start the API:
 
@@ -96,7 +101,7 @@ Run the API and PostgreSQL together:
 docker compose up --build
 ```
 
-The API listens on `http://127.0.0.1:8000` and initializes the database schema before starting.
+The API listens on `http://127.0.0.1:8000` and runs Alembic migrations before starting.
 
 ## Environment Variables Reference
 
@@ -106,8 +111,11 @@ The API listens on `http://127.0.0.1:8000` and initializes the database schema b
 | `GITHUB_API_BASE_URL` | No | `https://api.github.com` | Base URL for the GitHub REST API. Useful for tests or proxies. |
 | `GITHUB_TOKEN` | No | empty | Optional bearer token for higher GitHub rate limits. Never commit a real value. |
 | `HTTP_TIMEOUT_SECONDS` | No | `10` | Timeout for external GitHub API calls. Timeouts return `503`. |
+| `GITHUB_MAX_RETRIES` | No | `2` | Number of retry attempts for transient GitHub failures before returning `502` or `503`. |
+| `GITHUB_RETRY_BACKOFF_SECONDS` | No | `0.2` | Base async backoff delay between GitHub retry attempts. |
 | `DATABASE_AUTO_CREATE` | No | `false` | If true, the app creates ORM tables on startup. The init script is preferred for normal local runs. |
 | `LOG_LEVEL` | No | `INFO` | Python logging level. |
+| `LOG_JSON` | No | `true` | Emit structured JSON logs suitable for log aggregation. |
 
 ## API Reference
 
@@ -216,7 +224,9 @@ Run all tests with:
 pytest
 ```
 
-The unit tests cover schema-level input parsing, invalid input rejection, GitHub JSON mapping, and duplicate detection in the service layer without real network or database I/O. The integration tests use FastAPI with an async HTTP client, mock the GitHub client, and use isolated in-memory SQLite to cover the required endpoint scenarios plus upstream `502` and `503` handling.
+The unit tests cover schema-level input parsing, invalid input rejection, GitHub JSON mapping, duplicate detection, request tracing, and retry/error mapping without real network or database I/O. The integration tests use FastAPI with an async HTTP client, mock the GitHub client, and use isolated in-memory SQLite to cover the required endpoint scenarios plus upstream `502` and `503` handling.
+
+GitHub Actions runs the same `pytest` command on every push and pull request to `main`.
 
 ## Design Decisions
 
@@ -224,6 +234,9 @@ The unit tests cover schema-level input parsing, invalid input rejection, GitHub
 - The API accepts both `owner/repo` and `https://github.com/owner/repo` but rejects SSH URLs, non-GitHub domains, and URLs with extra path segments such as issues or pulls.
 - Route handlers stay thin; they only bind request/response models and delegate to the service layer.
 - Duplicate handling checks locally before calling GitHub for a faster `409`, but the database unique constraint is still the final authority.
+- Alembic migrations are included instead of relying only on ad hoc table creation, because reviewers can inspect and replay schema history.
+- External GitHub failures use bounded retries for transient `429` and `5xx` responses, but permanent upstream `404` responses are not retried.
+- Structured JSON logs and `X-Request-ID` headers are included for production-style debugging without changing the required four-endpoint API surface.
 - FastAPI's built-in docs routes are disabled so the public route surface remains exactly the four endpoints requested in the assessment.
 - Docker Compose is included as a bonus path for evaluators who want a clean PostgreSQL instance without manual setup.
 
@@ -241,6 +254,7 @@ The unit tests cover schema-level input parsing, invalid input rejection, GitHub
 | --- | --- | --- |
 | `asyncpg.exceptions.InvalidCatalogNameError` | The configured database does not exist. | Create `rest_api_assessment` in PostgreSQL or update `DATABASE_URL`. |
 | `ConnectionRefusedError` on startup or init | PostgreSQL is not running or the port differs. | Start PostgreSQL, verify host/port, or use `docker compose up --build`. |
+| Alembic cannot import `app` | The command is being run from outside the repository root. | `cd rest-api-assessment` and rerun `alembic upgrade head`. |
 | `422 Unprocessable Entity` for a URL | The URL is not exactly a GitHub repository URL. | Use `owner/repo` or `https://github.com/{owner}/{repo}` with no extra path. |
 | `503 Service Unavailable` from POST/PUT | GitHub timed out or the network is unavailable. | Check connectivity and optionally increase `HTTP_TIMEOUT_SECONDS`. |
 | GitHub rate-limit errors returning `502` | Unauthenticated GitHub API quota may be exhausted. | Set `GITHUB_TOKEN` in `.env` with a valid token. |

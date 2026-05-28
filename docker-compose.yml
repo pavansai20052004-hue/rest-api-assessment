@@ -25,8 +25,11 @@ services:
       GITHUB_API_BASE_URL: https://api.github.com
       GITHUB_TOKEN: ""
       HTTP_TIMEOUT_SECONDS: "10"
+      GITHUB_MAX_RETRIES: "2"
+      GITHUB_RETRY_BACKOFF_SECONDS: "0.2"
       LOG_LEVEL: INFO
-    command: sh -c "python scripts/init_db.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      LOG_JSON: "true"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
 

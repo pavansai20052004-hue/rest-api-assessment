@@ -1,3 +1,6 @@
+import asyncio
+import logging
+
 import httpx
 
 from app.core.config import Settings
@@ -8,6 +11,8 @@ from app.core.exceptions import (
 )
 from app.schemas.repository import GitHubRepositoryMetadata
 from app.services.github_mapper import map_github_repository
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubClient:
@@ -38,10 +43,28 @@ class GitHubClient:
         if self._client is None:
             raise RuntimeError("GitHubClient must be used as an async context manager.")
 
-        try:
-            response = await self._client.get(f"/repos/{external_id}")
-        except (httpx.TimeoutException, httpx.RequestError) as exc:
-            raise ExternalServiceUnavailable(external_id) from exc
+        response: httpx.Response | None = None
+        attempts = self.settings.github_max_retries + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await self._client.get(f"/repos/{external_id}")
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                if attempt < attempts:
+                    await self._sleep_before_retry(attempt, external_id, "network_error")
+                    continue
+                raise ExternalServiceUnavailable(external_id) from exc
+
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < attempts:
+                await self._sleep_before_retry(
+                    attempt,
+                    external_id,
+                    f"upstream_status_{response.status_code}",
+                )
+                continue
+            break
+
+        if response is None:
+            raise ExternalServiceUnavailable(external_id)
 
         if response.status_code == 404:
             raise ExternalRepositoryNotFound(external_id)
@@ -49,3 +72,17 @@ class GitHubClient:
             raise ExternalServiceError(external_id, upstream_status=response.status_code)
 
         return map_github_repository(response.json())
+
+    async def _sleep_before_retry(self, attempt: int, external_id: str, reason: str) -> None:
+        delay = self.settings.github_retry_backoff_seconds * attempt
+        logger.warning(
+            "Retrying GitHub request",
+            extra={
+                "external_id": external_id,
+                "attempt": attempt,
+                "delay_seconds": delay,
+                "reason": reason,
+            },
+        )
+        if delay > 0:
+            await asyncio.sleep(delay)

@@ -16,6 +16,18 @@ async def test_post_success_returns_201(api_client):
 
 
 @pytest.mark.asyncio
+async def test_response_includes_request_id_header(api_client):
+    response = await api_client.post(
+        "/repositories",
+        headers={"X-Request-ID": "assessment-trace-1"},
+        json={"identifier": "https://github.com/tiangolo/fastapi"},
+    )
+
+    assert response.status_code == 201
+    assert response.headers["X-Request-ID"] == "assessment-trace-1"
+
+
+@pytest.mark.asyncio
 async def test_post_duplicate_returns_409(api_client, fake_github_client):
     await api_client.post("/repositories", json={"identifier": "tiangolo/fastapi"})
 

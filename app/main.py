@@ -1,21 +1,18 @@
 from contextlib import asynccontextmanager
-import logging
 
 from fastapi import FastAPI
 
 from app.api.routes import router
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
+from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.db.database import create_db_schema
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_logging(settings)
     if settings.database_auto_create:
         await create_db_schema()
     yield
@@ -32,4 +29,5 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
+app.add_middleware(RequestLoggingMiddleware)
 app.include_router(router)
